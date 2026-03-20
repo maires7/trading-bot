@@ -12,47 +12,76 @@ FINNHUB_KEY = "d6uh4hhr01qp1k9ch0c0d6uh4hhr01qp1k9ch0cg"
 
 # --- WATCHLIST ---
 WATCHLIST = [
-    "BTC-USD", "^VIX", "^IXIC", "^DJI", "^GSPC",
     "MSTR", "QQQ", "AMPX", "DGXX",
     "IREN", "WULF", "NBIS", "ORCL",
-    "DJXXF", "QBTS", "IONQ", "RGTI",
+    "QBTS", "IONQ", "RGTI",
     "AMZN", "MSFT", "NVDA", "IBM",
-    "TSM", "TSLA", "APM", "RKLB",
+    "TSM", "TSLA", "RKLB",
     "ASTS", "OPEN"
 ]
 
-# --- FILE TO STORE SEEN NEWS ---
+# --- FILES ---
 SEEN_FILE = "seen_news.txt"
+MACRO_FILE = "seen_macro.txt"
 
-# --- LOAD SEEN NEWS ---
-if os.path.exists(SEEN_FILE):
-    with open(SEEN_FILE, "r") as f:
-        seen = set(f.read().splitlines())
-else:
-    seen = set()
+# --- LOAD SEEN ---
+def load_seen(file):
+    if os.path.exists(file):
+        with open(file, "r") as f:
+            return set(f.read().splitlines())
+    return set()
+
+seen = load_seen(SEEN_FILE)
+seen_macro = load_seen(MACRO_FILE)
 
 # --- TELEGRAM ---
 def send_alert(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, data={
-        "chat_id": CHAT_ID,
-        "text": message
-    })
+    requests.post(url, data={"chat_id": CHAT_ID, "text": message})
 
-# --- PRE-MARKET CHECK ---
+# --- PRE-MARKET ---
 def is_premarket():
     ny = pytz.timezone("US/Eastern")
     now = datetime.now(ny)
-
     return (4 <= now.hour < 9) or (now.hour == 9 and now.minute < 30)
+
+# --- API CLIENT ---
+def finnhub_get(endpoint, params=None):
+    url = f"https://finnhub.io/api/v1/{endpoint}"
+    params = params or {}
+    params["token"] = FINNHUB_KEY
+
+    try:
+        res = requests.get(url, params=params, timeout=10)
+        if res.status_code != 200:
+            return None
+        return res.json()
+    except:
+        return None
 
 # --- GET NEWS ---
 def get_news(ticker):
-    url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from=2025-01-01&to=2026-12-31&token={FINNHUB_KEY}"
-    try:
-        return requests.get(url).json()
-    except:
-        return []
+    return finnhub_get("company-news", {
+        "symbol": ticker,
+        "from": "2025-01-01",
+        "to": "2026-12-31"
+    }) or []
+
+# --- MACRO NEWS ---
+def get_macro_news():
+    return finnhub_get("news", {"category": "merger"}) or []
+
+# --- SENTIMENT ---
+def get_sentiment(ticker):
+    data = finnhub_get("news-sentiment", {"symbol": ticker})
+    if not data:
+        return None
+
+    sentiment = data.get("sentiment", {})
+    bullish = sentiment.get("bullishPercent", 0)
+    bearish = sentiment.get("bearishPercent", 0)
+
+    return round(bullish - bearish, 2)
 
 # --- CLASSIFIER ---
 def classify_news(text):
@@ -80,21 +109,7 @@ def classify_news(text):
 
     return None
 
-# --- PRICE CHANGE ---
-def get_price_change(ticker):
-    try:
-        stock = yf.Ticker(ticker)
-        data = stock.history(period="1d", interval="5m")
-
-        if len(data) > 0:
-            open_price = data["Open"][0]
-            current_price = data["Close"][-1]
-            change = ((current_price - open_price) / open_price) * 100
-            return round(change, 2)
-    except:
-        return None
-
-# --- RELEVANCE FILTER ---
+# --- RELEVANCE ---
 def is_relevant(ticker, text):
     text = text.lower()
 
@@ -103,8 +118,6 @@ def is_relevant(ticker, text):
         "MSFT": "microsoft",
         "NVDA": "nvidia",
         "TSLA": "tesla",
-        "META": "meta",
-        "GOOGL": "google",
         "IBM": "ibm",
         "ORCL": "oracle",
         "TSM": "taiwan semiconductor",
@@ -113,74 +126,91 @@ def is_relevant(ticker, text):
         "ASTS": "ast spacemobile"
     }
 
-    if ticker in names and names[ticker] in text:
-        return True
+    return ticker in names and names[ticker] in text
 
-    return False
+# --- PRICE ---
+def get_price_change(ticker):
+    try:
+        stock = yf.Ticker(ticker)
+        data = stock.history(period="1d", interval="5m")
+        if len(data) > 0:
+            open_price = data["Open"][0]
+            current_price = data["Close"][-1]
+            return round(((current_price - open_price) / open_price) * 100, 2)
+    except:
+        return None
 
 # --- MAIN LOOP ---
 while True:
-    current_time = int(time.time())
+    now = int(time.time())
 
+    # 🌍 MACRO NEWS
+    for article in get_macro_news():
+        aid = str(article.get("id", ""))
+        if not aid or aid in seen_macro:
+            continue
+
+        seen_macro.add(aid)
+        with open(MACRO_FILE, "a") as f:
+            f.write(aid + "\n")
+
+        headline = article.get("headline", "")
+        url = article.get("url", "")
+
+        tag = "🌍 PRE-MARKET MACRO" if is_premarket() else "🌍 MARKET NEWS"
+
+        send_alert(f"{tag}\n\n{headline}\n\n{url}")
+
+    time.sleep(2)
+
+    # 🎯 WATCHLIST
     for ticker in WATCHLIST:
         news_list = get_news(ticker)
 
         for news in news_list:
-            news_id = str(news.get("id", ""))
-
-            if not news_id:
+            nid = str(news.get("id", ""))
+            if not nid or nid in seen:
                 continue
 
-            if news_id in seen:
-                continue
-
-            # --- TIME FILTER (6 HOURS) ---
             news_time = news.get("datetime", 0)
-            if current_time - news_time > 21600:
+            if now - news_time > 21600:
                 continue
 
-            # --- SAVE ---
-            seen.add(news_id)
+            seen.add(nid)
             with open(SEEN_FILE, "a") as f:
-                f.write(news_id + "\n")
+                f.write(nid + "\n")
 
             headline = news.get("headline", "")
             summary = news.get("summary", "")
             url = news.get("url", "")
+            text = headline + " " + summary
 
-            full_text = headline + " " + summary
-
-            # --- RELEVANCE ---
-            if not is_relevant(ticker, full_text):
+            if not is_relevant(ticker, text):
                 continue
 
-            # --- CLASSIFY ---
-            category = classify_news(full_text)
+            category = classify_news(text)
             if not category:
                 continue
 
-            # --- PRICE ---
-            price_change = get_price_change(ticker)
+            price = get_price_change(ticker)
+            sentiment = get_sentiment(ticker)
 
-            # --- TRADE FILTER ---
-            if category == "📉 NEGATIVE" and price_change is not None and price_change < -5:
-                continue
+            # --- TRADE SCORE ---
+            score = "C"
+            if sentiment and sentiment > 20:
+                score = "A+"
+            elif sentiment and sentiment > 5:
+                score = "B"
 
-            if category == "📈 POSITIVE" and price_change is not None and price_change > 5:
-                continue
+            tag = "🚨 PRE-MARKET" if is_premarket() else category
 
-            # --- PRE-MARKET TAG ---
-            if is_premarket():
-                tag = "🚨 PRE-MARKET ALERT"
-            else:
-                tag = category
-
-            # --- ALERT ---
             message = f"""
 {tag}
 
 Ticker: {ticker}
-Move: {price_change}%
+Move: {price}%
+Sentiment: {sentiment}
+Score: {score}
 
 {headline}
 
