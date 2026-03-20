@@ -45,27 +45,27 @@ def get_news(ticker):
     except:
         return []
 
-# --- CLASSIFIER ---
+# --- CLASSIFIER (EXPANDED) ---
 def classify_news(text):
     text = text.lower()
 
     if any(k in text for k in [
         "offering", "dilution", "bankruptcy",
         "acquisition", "merger", "guidance",
-        "sec investigation", "lawsuit"
+        "lawsuit", "investigation"
     ]):
         return "🚨 VERY IMPORTANT"
 
     if any(k in text for k in [
         "beats", "growth", "partnership",
-        "contract", "record revenue",
-        "approval", "upgrade"
+        "contract", "record", "launch",
+        "expansion", "ai", "deal"
     ]):
         return "📈 POSITIVE"
 
     if any(k in text for k in [
         "misses", "decline", "loss",
-        "downgrade", "cuts forecast"
+        "downgrade", "cuts", "layoffs"
     ]):
         return "📉 NEGATIVE"
 
@@ -85,13 +85,9 @@ def get_price_change(ticker):
     except:
         return None
 
-# --- RELEVANCE FILTER ---
+# --- RELEVANCE FILTER (FIXED) ---
 def is_relevant(ticker, text):
     text = text.lower()
-    ticker = ticker.lower()
-
-    if ticker in text:
-        return True
 
     names = {
         "AMZN": "amazon",
@@ -103,7 +99,9 @@ def is_relevant(ticker, text):
         "IBM": "ibm",
         "ORCL": "oracle",
         "TSM": "taiwan semiconductor",
-        "MSTR": "microstrategy"
+        "MSTR": "microstrategy",
+        "RKLB": "rocket lab",
+        "ASTS": "ast spacemobile"
     }
 
     if ticker in names and names[ticker] in text:
@@ -127,9 +125,9 @@ while True:
             if news_id in seen:
                 continue
 
-            # --- TIME FILTER (only last 2 hours) ---
+            # --- TIME FILTER (FIXED → 6 HOURS) ---
             news_time = news.get("datetime", 0)
-            if current_time - news_time > 7200:
+            if current_time - news_time > 21600:
                 continue
 
             # --- SAVE TO SEEN ---
@@ -142,6 +140,9 @@ while True:
             url = news.get("url", "")
 
             full_text = headline + " " + summary
+
+            # --- DEBUG (OPTIONAL) ---
+            print(f"Checking: {ticker} - {headline}")
 
             # --- RELEVANCE ---
             if not is_relevant(ticker, full_text):
@@ -175,6 +176,6 @@ Move: {price_change}%
 """
             send_alert(message)
 
-        time.sleep(1)  # API safety
+        time.sleep(1)
 
     time.sleep(60)
