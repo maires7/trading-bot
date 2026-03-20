@@ -2,6 +2,8 @@ import requests
 import time
 import yfinance as yf
 import os
+from datetime import datetime
+import pytz
 
 # --- KEYS ---
 TELEGRAM_TOKEN = "8762235966:AAFPQBViUVDCClT7c3qA2qQQq3HQKKocx_A"
@@ -37,6 +39,13 @@ def send_alert(message):
         "text": message
     })
 
+# --- PRE-MARKET CHECK ---
+def is_premarket():
+    ny = pytz.timezone("US/Eastern")
+    now = datetime.now(ny)
+
+    return (4 <= now.hour < 9) or (now.hour == 9 and now.minute < 30)
+
 # --- GET NEWS ---
 def get_news(ticker):
     url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from=2025-01-01&to=2026-12-31&token={FINNHUB_KEY}"
@@ -45,7 +54,7 @@ def get_news(ticker):
     except:
         return []
 
-# --- CLASSIFIER (EXPANDED) ---
+# --- CLASSIFIER ---
 def classify_news(text):
     text = text.lower()
 
@@ -85,7 +94,7 @@ def get_price_change(ticker):
     except:
         return None
 
-# --- RELEVANCE FILTER (FIXED) ---
+# --- RELEVANCE FILTER ---
 def is_relevant(ticker, text):
     text = text.lower()
 
@@ -125,12 +134,12 @@ while True:
             if news_id in seen:
                 continue
 
-            # --- TIME FILTER (FIXED → 6 HOURS) ---
+            # --- TIME FILTER (6 HOURS) ---
             news_time = news.get("datetime", 0)
             if current_time - news_time > 21600:
                 continue
 
-            # --- SAVE TO SEEN ---
+            # --- SAVE ---
             seen.add(news_id)
             with open(SEEN_FILE, "a") as f:
                 f.write(news_id + "\n")
@@ -140,9 +149,6 @@ while True:
             url = news.get("url", "")
 
             full_text = headline + " " + summary
-
-            # --- DEBUG (OPTIONAL) ---
-            print(f"Checking: {ticker} - {headline}")
 
             # --- RELEVANCE ---
             if not is_relevant(ticker, full_text):
@@ -163,9 +169,15 @@ while True:
             if category == "📈 POSITIVE" and price_change is not None and price_change > 5:
                 continue
 
+            # --- PRE-MARKET TAG ---
+            if is_premarket():
+                tag = "🚨 PRE-MARKET ALERT"
+            else:
+                tag = category
+
             # --- ALERT ---
             message = f"""
-{category} NEWS
+{tag}
 
 Ticker: {ticker}
 Move: {price_change}%
