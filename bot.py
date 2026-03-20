@@ -178,4 +178,4 @@ Move: {price_change}%
 
         time.sleep(1)
 
-    time.sleep(60)
+    time.sleep(30)
