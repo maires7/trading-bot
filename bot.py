@@ -23,6 +23,7 @@ WATCHLIST = [
 # --- FILES ---
 SEEN_FILE = "seen_news.txt"
 MACRO_FILE = "seen_macro.txt"
+SPIKE_FILE = "seen_spikes.txt"
 
 # --- LOAD SEEN ---
 def load_seen(file):
@@ -33,19 +34,20 @@ def load_seen(file):
 
 seen = load_seen(SEEN_FILE)
 seen_macro = load_seen(MACRO_FILE)
+seen_spikes = load_seen(SPIKE_FILE)
 
 # --- TELEGRAM ---
 def send_alert(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     requests.post(url, data={"chat_id": CHAT_ID, "text": message})
 
-# --- PRE-MARKET ---
+# --- TIME ---
 def is_premarket():
     ny = pytz.timezone("US/Eastern")
     now = datetime.now(ny)
     return (4 <= now.hour < 9) or (now.hour == 9 and now.minute < 30)
 
-# --- API CLIENT ---
+# --- API ---
 def finnhub_get(endpoint, params=None):
     url = f"https://finnhub.io/api/v1/{endpoint}"
     params = params or {}
@@ -59,7 +61,7 @@ def finnhub_get(endpoint, params=None):
     except:
         return None
 
-# --- GET NEWS ---
+# --- NEWS ---
 def get_news(ticker):
     return finnhub_get("company-news", {
         "symbol": ticker,
@@ -67,7 +69,6 @@ def get_news(ticker):
         "to": "2026-12-31"
     }) or []
 
-# --- MACRO NEWS ---
 def get_macro_news():
     return finnhub_get("news", {"category": "merger"}) or []
 
@@ -140,6 +141,30 @@ def get_price_change(ticker):
     except:
         return None
 
+# --- SPIKE DETECTION ---
+def get_spike(ticker):
+    try:
+        stock = yf.Ticker(ticker)
+        data = stock.history(period="1d", interval="5m")
+
+        if len(data) < 10:
+            return None
+
+        last_close = data["Close"][-1]
+        prev_close = data["Close"][-2]
+        change = ((last_close - prev_close) / prev_close) * 100
+
+        avg_volume = data["Volume"].mean()
+        last_volume = data["Volume"][-1]
+
+        if abs(change) > 2 and last_volume > avg_volume * 3:
+            return round(change, 2)
+
+    except:
+        return None
+
+    return None
+
 # --- MAIN LOOP ---
 while True:
     now = int(time.time())
@@ -158,13 +183,36 @@ while True:
         url = article.get("url", "")
 
         tag = "🌍 PRE-MARKET MACRO" if is_premarket() else "🌍 MARKET NEWS"
-
         send_alert(f"{tag}\n\n{headline}\n\n{url}")
 
     time.sleep(2)
 
     # 🎯 WATCHLIST
     for ticker in WATCHLIST:
+
+        # --- SPIKE FIRST ---
+        spike = get_spike(ticker)
+
+        if spike:
+            spike_id = f"{ticker}_{round(time.time()/300)}"
+
+            if spike_id not in seen_spikes:
+                seen_spikes.add(spike_id)
+                with open(SPIKE_FILE, "a") as f:
+                    f.write(spike_id + "\n")
+
+                direction = "📈 SPIKE UP" if spike > 0 else "📉 SPIKE DOWN"
+
+                send_alert(f"""
+⚡ {direction}
+
+Ticker: {ticker}
+5m Move: {spike}%
+
+Unusual price + volume activity
+""")
+
+        # --- NEWS ---
         news_list = get_news(ticker)
 
         for news in news_list:
@@ -195,28 +243,27 @@ while True:
             price = get_price_change(ticker)
             sentiment = get_sentiment(ticker)
 
-            # --- TRADE SCORE ---
+            # --- SCORE ---
             score = "C"
             if sentiment and sentiment > 20:
                 score = "A+"
             elif sentiment and sentiment > 5:
                 score = "B"
 
+            if score == "C":
+                continue  # remove low-quality noise
+
             tag = "🚨 PRE-MARKET" if is_premarket() else category
 
-            message = f"""
-{tag}
+            send_alert(f"""
+{tag} | Score: {score}
 
-Ticker: {ticker}
-Move: {price}%
-Sentiment: {sentiment}
-Score: {score}
+{ticker} | {price}% | Sent: {sentiment}
 
 {headline}
 
 {url}
-"""
-            send_alert(message)
+""")
 
         time.sleep(1)
 
