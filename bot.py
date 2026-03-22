@@ -183,14 +183,15 @@ while True:
         url = article.get("url", "")
 
         tag = "🌍 PRE-MARKET MACRO" if is_premarket() else "🌍 MARKET NEWS"
-        send_alert(f"{tag}\n\n{headline}\n\n{url}")
+
+        send_alert(f"{tag}\n{headline}\n{url}")
 
     time.sleep(2)
 
     # 🎯 WATCHLIST
     for ticker in WATCHLIST:
 
-        # --- SPIKE FIRST ---
+        # --- SPIKE ---
         spike = get_spike(ticker)
 
         if spike:
@@ -203,14 +204,7 @@ while True:
 
                 direction = "📈 SPIKE UP" if spike > 0 else "📉 SPIKE DOWN"
 
-                send_alert(f"""
-⚡ {direction}
-
-Ticker: {ticker}
-5m Move: {spike}%
-
-Unusual price + volume activity
-""")
+                send_alert(f"⚡ {direction} | {ticker}\n5m Move: {spike}%")
 
         # --- NEWS ---
         news_list = get_news(ticker)
@@ -240,10 +234,8 @@ Unusual price + volume activity
             if not category:
                 continue
 
-            price = get_price_change(ticker)
             sentiment = get_sentiment(ticker)
 
-            # --- SCORE ---
             score = "C"
             if sentiment and sentiment > 20:
                 score = "A+"
@@ -251,19 +243,12 @@ Unusual price + volume activity
                 score = "B"
 
             if score == "C":
-                continue  # remove low-quality noise
+                continue
 
             tag = "🚨 PRE-MARKET" if is_premarket() else category
 
-            send_alert(f"""
-{tag} | Score: {score}
-
-{ticker} | {price}% | Sent: {sentiment}
-
-{headline}
-
-{url}
-""")
+            # 🔥 HEADLINE FIRST FORMAT
+            send_alert(f"{tag} | {ticker}\n{headline}\nScore: {score}\n{url}")
 
         time.sleep(1)
 
