@@ -110,9 +110,10 @@ def classify_news(text):
 
     return None
 
-# --- RELEVANCE ---
+# --- FIXED RELEVANCE ---
 def is_relevant(ticker, text):
     text = text.lower()
+    ticker_lower = ticker.lower()
 
     names = {
         "AMZN": "amazon",
@@ -127,7 +128,19 @@ def is_relevant(ticker, text):
         "ASTS": "ast spacemobile"
     }
 
-    return ticker in names and names[ticker] in text
+    # ticker symbol match
+    if ticker_lower in text:
+        return True
+
+    # company name match
+    if ticker in names and names[ticker] in text:
+        return True
+
+    # allow unknown tickers (IMPORTANT FIX)
+    if ticker not in names:
+        return True
+
+    return False
 
 # --- PRICE ---
 def get_price_change(ticker):
@@ -242,13 +255,10 @@ while True:
             elif sentiment and sentiment > 5:
                 score = "B"
 
-            if score == "C":
-                continue
-
             tag = "🚨 PRE-MARKET" if is_premarket() else category
 
-            # 🔥 HEADLINE FIRST FORMAT
-            send_alert(f"{tag} | {ticker}\n{headline}\nScore: {score}\n{url}")
+            # ✅ FIXED NOTIFICATION FORMAT
+            send_alert(f"{tag} | {ticker} — {headline}\nScore: {score}\n{url}")
 
         time.sleep(1)
 
